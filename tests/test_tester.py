@@ -8,7 +8,7 @@ from mythings.ledger import Ledger
 from mythings.policy import Action, Decision, PolicyResult
 
 from conftest import FakeRunner, make_target_repo
-from mytester.tester import Tester, _strip_code_fence
+from mytester.tester import Tester, _append_test, _has_real_assertion, _strip_code_fence
 
 
 def test_strip_code_fence_removes_language_tagged_fence() -> None:
@@ -24,6 +24,41 @@ def test_strip_code_fence_removes_bare_fence() -> None:
 def test_strip_code_fence_passes_through_unfenced_text() -> None:
     text = "def test_x():\n    assert True"
     assert _strip_code_fence(text) == text
+
+
+def test_has_real_assertion_accepts_pytest_raises() -> None:
+    src = "def test_x():\n    with pytest.raises(ValueError):\n        f()"
+    assert _has_real_assertion(src)
+
+
+def test_has_real_assertion_rejects_trivial_assert_true() -> None:
+    src = "def test_x():\n    assert True"
+    assert not _has_real_assertion(src)
+
+
+def test_has_real_assertion_rejects_body_with_no_assertion() -> None:
+    src = "def test_x():\n    f()"
+    assert not _has_real_assertion(src)
+
+
+def test_append_test_renames_generated_test_colliding_with_existing_one(tmp_path: Path) -> None:
+    # A generated test reusing an existing test's name would otherwise be a
+    # later `def` at module scope, silently shadowing the original -- pytest
+    # would never collect it again, with no error anywhere in the pipeline.
+    path = tmp_path / "tests" / "test_ops.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "def test_sub():\n    assert True  # pre-existing test, must survive\n",
+        encoding="utf-8",
+    )
+
+    written = _append_test(path, "def test_sub():\n    assert 1 == 1\n")
+
+    combined = path.read_text(encoding="utf-8")
+    assert combined.count("def test_sub()") == 1  # original keeps its name, isn't overwritten
+    assert "must survive" in combined  # original body is untouched
+    assert "def test_sub_2()" in combined  # new test appended under a renamed, unique name
+    assert "def test_sub_2()" in written  # caller sees the renamed source, not the original
 
 
 def _tester(repo: Path, tmp_path: Path, **kw) -> tuple[Tester, FakeRunner, Ledger]:
@@ -89,14 +124,91 @@ class _SpyEngine:
 
 def test_fenced_engine_reply_is_stripped_before_appending(tmp_path: Path) -> None:
     repo = make_target_repo(tmp_path, fully_covered=False)
-    fenced = "```python\ndef test_sub():\n    assert sub(3, 1) == 2\n```"
+    fenced = (
+        "```python\nfrom calc.ops import sub\n\n\ndef test_sub():\n"
+        "    assert sub(3, 1) == 2\n```"
+    )
     tester, fake, ledger = _tester(repo, tmp_path, engine=_SpyEngine(fenced))
 
     result = tester.run(issue=5, local_only=True)
 
     assert result.outcome == "success"
     assert "```" not in result.test
-    assert result.test == "def test_sub():\n    assert sub(3, 1) == 2"
+    assert result.test == "from calc.ops import sub\n\n\ndef test_sub():\n    assert sub(3, 1) == 2"
+
+
+def test_vacuous_generated_test_is_rejected(tmp_path: Path) -> None:
+    repo = make_target_repo(tmp_path, fully_covered=False)
+    trivial = "def test_sub():\n    assert True"
+    tester, fake, ledger = _tester(repo, tmp_path, engine=_SpyEngine(trivial))
+
+    result = tester.run(issue=5)
+
+    assert result.outcome == "failure"
+    assert "no real assertion" in result.detail
+    assert not any(c[:2] == ["pr", "create"] for c in fake.calls)
+    assert list(ledger)[0].outcome == "failure"
+
+
+def test_failing_generated_test_opens_pr_flagged_as_bug_found(tmp_path: Path) -> None:
+    repo = make_target_repo(tmp_path, fully_covered=False)
+    wrong = "from calc.ops import sub\n\n\ndef test_sub():\n    assert sub(3, 1) == 999"
+    tester, fake, ledger = _tester(repo, tmp_path, engine=_SpyEngine(wrong))
+
+    result = tester.run(issue=5)
+
+    assert result.outcome == "bug_found"
+    assert result.pr == 7
+    pr_call = next(c for c in fake.calls if c[:2] == ["pr", "create"])
+    title = pr_call[pr_call.index("--title") + 1]
+    body = pr_call[pr_call.index("--body") + 1]
+    assert "possible bug" in title
+    assert "investigate before merging" in body
+    assert list(ledger)[0].outcome == "bug_found"
+
+
+def test_test_with_no_import_is_rejected_not_flagged_as_bug(tmp_path: Path) -> None:
+    repo = make_target_repo(tmp_path, fully_covered=False)
+    broken = "def test_sub():\n    assert sub(3, 1) == 2"  # sub never imported
+    tester, fake, ledger = _tester(repo, tmp_path, engine=_SpyEngine(broken))
+
+    result = tester.run(issue=5)
+
+    assert result.outcome == "failure"
+    assert "could not run" in result.detail
+    assert not any(c[:2] == ["pr", "create"] for c in fake.calls)
+
+
+def test_assertion_message_mentioning_nameerror_is_still_a_bug_found(tmp_path: Path) -> None:
+    # A failing assertion whose *message* happens to contain the word
+    # "NameError" must not be misread as the test itself having a missing
+    # import -- pytest's short summary prefixes real NameErrors with
+    # "NameError:", not "AssertionError:", so this should still surface as a
+    # real (if fabricated, for this test) bug in the target code.
+    repo = make_target_repo(tmp_path, fully_covered=False)
+    wrong = (
+        "from calc.ops import sub\n\n\n"
+        'def test_sub():\n    assert sub(3, 1) == 999, "sub raised NameError in legacy branch"\n'
+    )
+    tester, fake, ledger = _tester(repo, tmp_path, engine=_SpyEngine(wrong))
+
+    result = tester.run(issue=5)
+
+    assert result.outcome == "bug_found"
+    assert result.pr == 7
+
+
+def test_real_engine_empty_reply_is_rejected_not_silently_success(tmp_path: Path) -> None:
+    # A non-Noop engine that fails to produce a reply falls back to the same
+    # placeholder text NoopEngine uses -- but only NoopEngine is exempt from
+    # the quality gate, so this must be rejected, not treated as a success.
+    repo = make_target_repo(tmp_path, fully_covered=False)
+    tester, fake, ledger = _tester(repo, tmp_path, engine=_SpyEngine(""))
+
+    result = tester.run(issue=5)
+
+    assert result.outcome == "failure"
+    assert not any(c[:2] == ["pr", "create"] for c in fake.calls)
 
 
 class _DenyAll:

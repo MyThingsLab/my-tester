@@ -26,4 +26,18 @@ covered here defers to `HARNESS.md`, then `mythings-core/docs/CONVENTIONS.md`.
   `my-tester/<issue-number>`, never merges. Never touches files outside the one
   test file it edits/creates. If coverage is already 100%, it does nothing
   (`outcome=skipped`, exit 0) — its only no-op branch, deterministic.
+- **Quality gate on the generated test:** before committing, the appended test
+  is checked for a real (non-trivial) assertion or `pytest.raises` block —
+  `assert True`/no-assertion replies are rejected (`outcome=failure`, no PR) —
+  then actually executed via `pytest <file>::<test>`. Three outcomes: it
+  passes (`outcome=success`, normal PR); it fails on a genuine assertion
+  mismatch (`outcome=bug_found` — the PR still opens, titled/labeled as a
+  possible bug in the target code rather than a coverage PR, `exit 2` from the
+  CLI); or it can't run at all, e.g. a missing import (`outcome=failure`, no
+  PR — bad codegen, not a target-code bug). `NoopEngine`'s fixed placeholder is
+  exempt from this gate (see above).
+- **Name-collision guard:** if the generated test's function name matches one
+  already in the target test file, `_append_test` renames it (`test_x` →
+  `test_x_2`, ...) before writing, so it can never silently shadow a
+  pre-existing test at module scope.
 - **Backlog label:** `my-tester`.

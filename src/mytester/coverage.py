@@ -23,20 +23,23 @@ class CoverageError(RuntimeError):
     pass
 
 
+def _pythonpath(worktree: Path) -> str:
+    # Make a flat or src-layout target package importable without installing it.
+    return os.pathsep.join(
+        p for p in (str(worktree), str(worktree / "src"), os.environ.get("PYTHONPATH", "")) if p
+    )
+
+
 def measure_coverage(worktree: Path, package: str) -> dict:
     # Shells out to the *target repo's* pytest (MyTester stays dependency-free at
     # runtime; pytest-cov is assumed a dev-dep of the target). JSON report is more
     # robust to parse than --cov text output.
-    # Make a flat or src-layout target package importable without installing it.
-    pythonpath = os.pathsep.join(
-        p for p in (str(worktree), str(worktree / "src"), os.environ.get("PYTHONPATH", "")) if p
-    )
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", f"--cov={package}", "--cov-report=json", "-q"],
         cwd=worktree,
         capture_output=True,
         text=True,
-        env={**os.environ, "PYTHONPATH": pythonpath},
+        env={**os.environ, "PYTHONPATH": _pythonpath(worktree)},
     )
     report = worktree / "coverage.json"
     if not report.exists():
@@ -44,6 +47,18 @@ def measure_coverage(worktree: Path, package: str) -> dict:
             f"no coverage.json produced (pytest exit {proc.returncode}): {proc.stderr.strip()}"
         )
     return json.loads(report.read_text(encoding="utf-8"))
+
+
+def run_single_test(worktree: Path, relpath: str, test_name: str) -> subprocess.CompletedProcess:
+    # Runs just the newly generated test node, not the whole suite, so an
+    # unrelated pre-existing failure can't be mistaken for this generation.
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", f"{relpath}::{test_name}", "-q"],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": _pythonpath(worktree)},
+    )
 
 
 def total_percent(coverage: dict) -> float:
