@@ -58,12 +58,27 @@ def locate_test_file(tree: Path, unit: Unit) -> tuple[str, str | None]:
 def _build_prompt(unit: Unit, sample: str | None) -> str:
     parts = [
         f"Write one pytest test for {unit.qualname}.",
+        "Reply with only the raw Python source for the test function — no markdown "
+        "code fences, no explanation, nothing but the code.",
         "Source under test:",
         unit.source,
     ]
     if sample:
         parts += ["Match the style of this existing test:", sample]
     return "\n\n".join(parts)
+
+
+def _strip_code_fence(text: str) -> str:
+    # Defense in depth: the prompt asks for raw code, but a model reply can
+    # still arrive wrapped in a ```python ... ``` fence. Strip one if present.
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[-1].strip() == "```":
+        lines = lines[1:-1]
+    else:
+        lines = lines[1:]
+    return "\n".join(lines)
 
 
 def _append_test(path: Path, new_test: str) -> None:
@@ -115,12 +130,13 @@ class Tester:
             return Result("skipped", None, None, "fully covered")
 
         relpath, sample = locate_test_file(tree, unit)
-        new_test = self.engine.run(
+        reply = self.engine.run(
             EngineRequest(
                 prompt=_build_prompt(unit, sample),
                 context={"target": unit.qualname, "existing_test_file": relpath},
             )
-        ).text.strip() or _PLACEHOLDER
+        ).text.strip()
+        new_test = _strip_code_fence(reply).strip() if reply else _PLACEHOLDER
         _append_test(tree / relpath, new_test)
 
         if local_only:
