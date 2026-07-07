@@ -179,6 +179,25 @@ def test_test_with_no_import_is_rejected_not_flagged_as_bug(tmp_path: Path) -> N
     assert not any(c[:2] == ["pr", "create"] for c in fake.calls)
 
 
+def test_long_test_name_missing_import_is_still_rejected_not_a_bug(tmp_path: Path) -> None:
+    # pytest's "short test summary info" line is elided by terminal-width
+    # truncation once the node id itself is long enough -- a realistic
+    # generated test name is long enough to drop the "- NameError: ..."
+    # suffix entirely, so classification must not depend on that line.
+    repo = make_target_repo(tmp_path, fully_covered=False)
+    broken = (
+        "def test_sub_handles_negative_and_boundary_inputs_correctly_for_real():\n"
+        "    assert sub(3, 1) == 2"
+    )  # sub never imported
+    tester, fake, ledger = _tester(repo, tmp_path, engine=_SpyEngine(broken))
+
+    result = tester.run(issue=5)
+
+    assert result.outcome == "failure"
+    assert "could not run" in result.detail
+    assert not any(c[:2] == ["pr", "create"] for c in fake.calls)
+
+
 def test_assertion_message_mentioning_nameerror_is_still_a_bug_found(tmp_path: Path) -> None:
     # A failing assertion whose *message* happens to contain the word
     # "NameError" must not be misread as the test itself having a missing
