@@ -74,12 +74,20 @@ def locate_test_file(tree: Path, unit: Unit) -> tuple[str, str | None]:
     return relpath, None
 
 
-def _build_prompt(unit: Unit, sample: str | None) -> str:
+def _build_prompt(unit: Unit, module_source: str, sample: str | None) -> str:
     parts = [
         f"Write one pytest test for {unit.qualname}.",
         "Reply with only the raw Python source for the test function — no markdown "
-        "code fences, no explanation, nothing but the code.",
-        "Source under test:",
+        "code fences, no explanation, nothing but the code. Include any "
+        "`import`/`from ... import ...` statements it needs (e.g. for the "
+        "function under test or any type it constructs) directly above the "
+        "test function in your reply — don't assume they're already in scope.",
+        # The unit's own source alone isn't enough context to construct any type
+        # it references correctly (e.g. a dataclass's fields) -- the full module
+        # is small and cheap to include, and removes the guesswork.
+        f"Full source of the module it's defined in ({unit.module}):",
+        module_source,
+        "The function/method under test:",
         unit.source,
     ]
     if sample:
@@ -147,14 +155,13 @@ class Validation:
     output: str = ""
 
 
-# pytest's "short test summary info" reports an uncaught non-assert exception
-# as "FAILED <nodeid> - <ExceptionType>: ...". A plain `assert` failure never
-# starts that way (it's either "- assert <expr>" from rewriting, or, with an
-# explicit assert message, "- AssertionError: <message>") -- so anchoring on
-# this line, rather than searching the whole output, tells apart a generated
-# test that forgot an import from one whose assertion message merely mentions
-# "NameError" in passing.
-_NAME_ERROR_SUMMARY = re.compile(r"^FAILED \S+ - NameError:", re.MULTILINE)
+# Every pytest failure traceback ends with a "<path>:<lineno>: <ExceptionType>"
+# location line naming just the exception class, no message -- unlike the
+# "short test summary info" line (FAILED <nodeid> - ...), this one is never
+# elided by terminal-width truncation for a long node id, and unlike a raw
+# substring search it can't false-positive on an assertion message that merely
+# mentions "NameError" in passing (that still ends in ": AssertionError").
+_NAME_ERROR_LOCATION = re.compile(r":\d+: NameError$", re.MULTILINE)
 
 
 def _validate(tree: Path, relpath: str, new_test: str) -> Validation:
@@ -165,7 +172,7 @@ def _validate(tree: Path, relpath: str, new_test: str) -> Validation:
     output = (proc.stdout + proc.stderr).strip()
     if proc.returncode == 0:
         return Validation("passed", output)
-    if proc.returncode == 1 and not _NAME_ERROR_SUMMARY.search(output):
+    if proc.returncode == 1 and not _NAME_ERROR_LOCATION.search(output):
         return Validation("failed", output)  # ran, assertion failed -- possible real bug
     return Validation("errored", output)  # collection/usage/internal error -- bad generated code
 
@@ -247,10 +254,11 @@ class Tester:
             return Result("skipped", None, None, "fully covered")
 
         relpath, sample = locate_test_file(tree, unit)
+        module_source = (tree / unit.file).read_text(encoding="utf-8")
         reply = self.engine.run(
             EngineRequest(
                 system=_SYSTEM,
-                prompt=_build_prompt(unit, sample),
+                prompt=_build_prompt(unit, module_source, sample),
                 context={"target": unit.qualname, "existing_test_file": relpath},
             )
         ).text.strip()
