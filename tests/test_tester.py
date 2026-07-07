@@ -2,12 +2,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mythings.engine import EngineRequest, EngineResult
 from mythings.github import GitHub
 from mythings.ledger import Ledger
 from mythings.policy import Action, Decision, PolicyResult
 
 from conftest import FakeRunner, make_target_repo
-from mytester.tester import Tester
+from mytester.tester import Tester, _strip_code_fence
+
+
+def test_strip_code_fence_removes_language_tagged_fence() -> None:
+    text = "```python\ndef test_x():\n    assert True\n```"
+    assert _strip_code_fence(text) == "def test_x():\n    assert True"
+
+
+def test_strip_code_fence_removes_bare_fence() -> None:
+    text = "```\ndef test_x():\n    assert True\n```"
+    assert _strip_code_fence(text) == "def test_x():\n    assert True"
+
+
+def test_strip_code_fence_passes_through_unfenced_text() -> None:
+    text = "def test_x():\n    assert True"
+    assert _strip_code_fence(text) == text
 
 
 def _tester(repo: Path, tmp_path: Path, **kw) -> tuple[Tester, FakeRunner, Ledger]:
@@ -61,6 +77,26 @@ def test_local_only_prints_test_without_pr(tmp_path: Path) -> None:
     assert "test_noop_placeholder" in result.test  # NoopEngine placeholder
     assert fake.calls == []
     assert list(ledger)[0].data["pr"] is None
+
+
+class _SpyEngine:
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+
+    def run(self, request: EngineRequest) -> EngineResult:
+        return EngineResult(text=self.reply)
+
+
+def test_fenced_engine_reply_is_stripped_before_appending(tmp_path: Path) -> None:
+    repo = make_target_repo(tmp_path, fully_covered=False)
+    fenced = "```python\ndef test_sub():\n    assert sub(3, 1) == 2\n```"
+    tester, fake, ledger = _tester(repo, tmp_path, engine=_SpyEngine(fenced))
+
+    result = tester.run(issue=5, local_only=True)
+
+    assert result.outcome == "success"
+    assert "```" not in result.test
+    assert result.test == "def test_sub():\n    assert sub(3, 1) == 2"
 
 
 class _DenyAll:

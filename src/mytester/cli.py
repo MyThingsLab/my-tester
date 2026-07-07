@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from mythings.engine import ClaudeCLIEngine, Engine, NoopEngine
 from mythings.github import GitHub
 from mythings.ledger import Ledger
 
 from mytester.tester import Result, Tester
+
+_ENGINES: dict[str, type[Engine]] = {"noop": NoopEngine, "claude-cli": ClaudeCLIEngine}
 
 
 def _render(result: Result) -> str:
@@ -36,6 +39,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the PR; print the generated test (dev loop)",
     )
+    run.add_argument(
+        "--engine",
+        choices=sorted(_ENGINES),
+        default="noop",
+        help="Engine backend for writing the test (default: noop — a fixed placeholder test)",
+    )
 
     args = parser.parse_args(argv)
     tester = Tester(
@@ -44,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         github=GitHub(args.repo),
         base=args.base,
         package=args.package,
+        engine=_ENGINES[args.engine]() if args.engine != "noop" else None,
     )
     result = tester.run(args.issue, local_only=args.local_only)
     print(_render(result))
