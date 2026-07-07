@@ -57,7 +57,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     result = tester.run(args.issue, local_only=args.local_only)
     print(_render(result))
-    return 0 if result.outcome != "failure" else 1
+    # bug_found gets its own nonzero code, distinct from a plain tool failure,
+    # so automation chaining on exit status can't mistake a discovered bug
+    # for an ordinary success but can still tell it apart from mytester itself
+    # having failed to do its job.
+    if result.outcome == "failure":
+        return 1
+    if result.outcome == "bug_found":
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
