@@ -3,7 +3,7 @@
 [![CI](https://github.com/MyThingsLab/my-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/MyThingsLab/my-tester/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/MyThingsLab/my-tester/branch/main/graph/badge.svg)](https://codecov.io/gh/MyThingsLab/my-tester) ![Python](https://img.shields.io/badge/python-3.11%2B-blue) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Runs pytest with coverage, finds one uncovered unit, and opens a PR adding a
-test for it — the smallest full [MyThingsLab](../mythings-core) harness loop
+test for it — the smallest full [MyThingsLab](../my-things-core) harness loop
 (issue → deterministic pre-work → one Engine call → PR → ledger).
 
 ## How it works
@@ -32,7 +32,7 @@ mytester run --local-only   # skip the PR; print the generated test
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ../mythings-core -e ../my-guard -e ".[dev]"
+pip install -e ../my-things-core -e ../my-guard -e ".[dev]"
 pytest
 ```
 
