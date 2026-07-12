@@ -1,0 +1,1 @@
+{"data":{"files":"tests/","session":"2026-07-12"},"detail":"Mechanical migration to mythings.testing: shared FakeGh/make_git_repo replace the local FakeRunner and bare-origin builder; calc fixture sources stay local.","kind":"build","outcome":"success","tool":"claude-code","ts":"2026-07-12T10:12:05Z"}
