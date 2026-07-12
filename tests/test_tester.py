@@ -7,7 +7,7 @@ from mythings.github import GitHub
 from mythings.ledger import Ledger
 from mythings.policy import Action, Decision, PolicyResult
 
-from conftest import FakeRunner, make_target_repo
+from conftest import FakeGh, fake_gh, make_target_repo
 from mytester.tester import Tester, _append_test, _has_real_assertion, _strip_code_fence
 
 
@@ -61,8 +61,8 @@ def test_append_test_renames_generated_test_colliding_with_existing_one(tmp_path
     assert "def test_sub_2()" in written  # caller sees the renamed source, not the original
 
 
-def _tester(repo: Path, tmp_path: Path, **kw) -> tuple[Tester, FakeRunner, Ledger]:
-    fake = FakeRunner()
+def _tester(repo: Path, tmp_path: Path, **kw) -> tuple[Tester, FakeGh, Ledger]:
+    fake = fake_gh()
     ledger = Ledger(tmp_path / "ledger.jsonl")
     tester = Tester(repo=repo, ledger=ledger, github=GitHub("owner/name", runner=fake), **kw)
     return tester, fake, ledger

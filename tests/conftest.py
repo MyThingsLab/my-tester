@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
+# Shared fakes come from mythings.testing (plain imports; aliased fixture
+# re-export + getfixturevalue wrapper per core docs/CONVENTIONS.md).
+from mythings.testing import FakeGh, make_git_repo
+from mythings.testing import clean_git_env as _shared_clean_git_env  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
-def _clean_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    # pre-commit runs hooks with GIT_DIR/GIT_INDEX_FILE set; they leak into the
-    # git subprocesses these tests spawn (and into isolation.Workspace) and break
-    # worktree ops on the throwaway repo. Real MyTester runs aren't inside a hook.
-    for var in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY"):
-        monkeypatch.delenv(var, raising=False)
+def _clean_git_env(request: pytest.FixtureRequest) -> None:
+    # Real git worktrees in every test; hook-launched pytest (pre-commit)
+    # must not leak GIT_* into them.
+    request.getfixturevalue("_shared_clean_git_env")
+
 
 _OPS = """def add(a, b):
     return a + b
@@ -45,40 +48,16 @@ def test_sub():
 """
 
 
-def _git(repo: Path, *argv: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *argv], check=True, capture_output=True, text=True)
-
-
-class FakeRunner:
-    # Mocks only the `gh` subprocess boundary.
-    def __init__(self) -> None:
-        self.calls: list[list[str]] = []
-
-    def __call__(self, argv: list[str]) -> str:
-        self.calls.append(argv)
-        if argv[:2] == ["pr", "create"]:
-            return "https://github.com/owner/name/pull/7\n"
-        raise AssertionError(f"unexpected gh call: {argv}")
+def fake_gh() -> FakeGh:
+    return FakeGh({("pr", "create"): "https://github.com/owner/name/pull/7\n"})
 
 
 def make_target_repo(tmp_path: Path, *, fully_covered: bool) -> Path:
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
-
-    repo = tmp_path / "work"
-    repo.mkdir()
-    (repo / "calc").mkdir()
-    (repo / "calc" / "__init__.py").write_text("", encoding="utf-8")
-    (repo / "calc" / "ops.py").write_text(_OPS, encoding="utf-8")
-    (repo / "tests").mkdir()
-    test_src = _TEST_BOTH if fully_covered else _TEST_ADD
-    (repo / "tests" / "test_ops.py").write_text(test_src, encoding="utf-8")
-
-    _git(repo, "init", "-b", "main")
-    _git(repo, "config", "user.email", "t@example.com")
-    _git(repo, "config", "user.name", "Tester")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "init")
-    _git(repo, "remote", "add", "origin", str(origin))
-    _git(repo, "push", "-u", "origin", "main")
-    return repo
+    return make_git_repo(
+        tmp_path,
+        files={
+            "calc/__init__.py": "",
+            "calc/ops.py": _OPS,
+            "tests/test_ops.py": _TEST_BOTH if fully_covered else _TEST_ADD,
+        },
+    ).path
