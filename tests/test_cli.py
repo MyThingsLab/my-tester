@@ -4,6 +4,7 @@ import pytest
 from mythings.engine import ClaudeCLIEngine
 
 from mytester import cli
+from mytester.green import GreenResult
 from mytester.red import RedResult
 from mytester.tester import Result
 
@@ -128,3 +129,41 @@ def test_red_subcommand_threads_base_and_repo(monkeypatch: pytest.MonkeyPatch) -
 
     assert captured["kwargs"]["base"] == "dev"
     assert captured["kwargs"]["github"].repo == "o/r"
+
+
+def test_render_green() -> None:
+    assert cli._render_green(GreenResult("verified", detail="d")) == "verified: d"
+
+
+def _stub_green(monkeypatch: pytest.MonkeyPatch, result: GreenResult) -> dict:
+    captured: dict = {}
+
+    class _Stub:
+        def __init__(self, **kwargs: object) -> None:
+            captured["kwargs"] = kwargs
+
+        def run(self, issue: int) -> GreenResult:
+            captured["issue"] = issue
+            return result
+
+    monkeypatch.setattr(cli, "Green", _Stub)
+    return captured
+
+
+def test_green_subcommand_runs_and_prints(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _stub_green(monkeypatch, GreenResult("verified", detail="d"))
+
+    assert cli.main(["green", "9"]) == 0
+    assert captured["issue"] == 9
+
+
+def test_green_subcommand_nonzero_on_needs_human(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_green(monkeypatch, GreenResult("needs_human", detail="d"))
+
+    assert cli.main(["green", "9"]) == 1
+
+
+def test_green_subcommand_zero_on_reopened(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_green(monkeypatch, GreenResult("reopened", detail="d"))
+
+    assert cli.main(["green", "9"]) == 0
