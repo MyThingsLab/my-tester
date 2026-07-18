@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -47,6 +48,30 @@ def measure_coverage(worktree: Path, package: str) -> dict:
             f"no coverage.json produced (pytest exit {proc.returncode}): {proc.stderr.strip()}"
         )
     return json.loads(report.read_text(encoding="utf-8"))
+
+
+def run_suite(worktree: Path) -> subprocess.CompletedProcess:
+    # The RED phase: no --cov, just pass/fail -- this stays a separate call from
+    # measure_coverage (GAP's own full-suite run) rather than one doing double duty,
+    # since the two subcommands never run in the same invocation.
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-q"],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": _pythonpath(worktree)},
+    )
+
+
+# pytest's "short test summary info" section ends the run with one "FAILED
+# <nodeid> - <reason>" line per failing test -- already unique per parametrized
+# variant, since the node id includes the case -- so it's exactly the grouping
+# key RED needs without any extra parsing of the fuller per-test tracebacks.
+_FAILED_LINE = re.compile(r"^FAILED (?P<nodeid>\S+)(?: - (?P<reason>.*))?$", re.MULTILINE)
+
+
+def parse_failures(output: str) -> list[tuple[str, str]]:
+    return [(m["nodeid"], (m["reason"] or "").strip()) for m in _FAILED_LINE.finditer(output)]
 
 
 def run_single_test(worktree: Path, relpath: str, test_name: str) -> subprocess.CompletedProcess:
