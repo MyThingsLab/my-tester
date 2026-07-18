@@ -5,6 +5,7 @@ from mythings.engine import ClaudeCLIEngine
 
 from mytester import cli
 from mytester.green import GreenResult
+from mytester.health import HealthResult
 from mytester.red import RedResult
 from mytester.tester import Result
 
@@ -167,3 +168,35 @@ def test_green_subcommand_zero_on_reopened(monkeypatch: pytest.MonkeyPatch) -> N
     _stub_green(monkeypatch, GreenResult("reopened", detail="d"))
 
     assert cli.main(["green", "9"]) == 0
+
+
+_HEALTH_RESULT = HealthResult(
+    totals={"passed": 1, "failed": 0, "error": 0, "skipped": 0, "xfailed": 0, "xpassed": 0},
+    loop={},
+    scores={"pass_rate": 1.0, "quality": None, "verified_rate": None},
+)
+
+
+def _stub_health(monkeypatch: pytest.MonkeyPatch, result: HealthResult) -> dict:
+    captured: dict = {}
+
+    class _Stub:
+        def __init__(self, **kwargs: object) -> None:
+            captured["kwargs"] = kwargs
+
+        def run(self) -> HealthResult:
+            captured["ran"] = True
+            return result
+
+    monkeypatch.setattr(cli, "Health", _Stub)
+    return captured
+
+
+def test_health_subcommand_writes_and_prints(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    captured = _stub_health(monkeypatch, _HEALTH_RESULT)
+    out = tmp_path / "test_health.json"
+
+    assert cli.main(["health", "--out", str(out)]) == 0
+    assert captured["ran"]
+    assert out.exists()
+    assert '"pass_rate": 1.0' in out.read_text(encoding="utf-8")

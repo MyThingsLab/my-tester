@@ -8,6 +8,7 @@ from mythings.github import GitHub
 from mythings.ledger import Ledger
 
 from mytester.green import Green, GreenResult
+from mytester.health import Health, HealthResult, write
 from mytester.red import Red, RedResult
 from mytester.tester import Result, Tester
 
@@ -32,6 +33,10 @@ def _render_red(result: RedResult) -> str:
 
 def _render_green(result: GreenResult) -> str:
     return f"{result.outcome}: {result.detail}"
+
+
+def _render_health(result: HealthResult) -> str:
+    return result.to_json()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -74,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     green.add_argument("--source", type=Path, default=Path.cwd(), help="local git repo to test")
     green.add_argument("--ledger", type=Path, default=Path(".mythings/ledger.jsonl"))
 
+    health = sub.add_parser("health", help="emit a test-health record to the ledger dir")
+    health.add_argument("--base", default="main", help="base branch to run the suite against")
+    health.add_argument("--source", type=Path, default=Path.cwd(), help="local git repo to test")
+    health.add_argument("--ledger", type=Path, default=Path(".mythings/ledger.jsonl"))
+    health.add_argument("--out", type=Path, default=Path(".mythings/test_health.json"))
+
     args = parser.parse_args(argv)
     if args.cmd == "red":
         red_result = Red(
@@ -94,6 +105,12 @@ def main(argv: list[str] | None = None) -> int:
         ).run(args.issue)
         print(_render_green(green_result))
         return 1 if green_result.outcome in ("needs_human", "not_found") else 0
+
+    if args.cmd == "health":
+        health_result = Health(repo=args.source, ledger=Ledger(args.ledger), base=args.base).run()
+        write(health_result, args.out)
+        print(_render_health(health_result))
+        return 0
 
     tester = Tester(
         repo=args.source,
