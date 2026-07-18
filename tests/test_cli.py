@@ -4,6 +4,7 @@ import pytest
 from mythings.engine import ClaudeCLIEngine
 
 from mytester import cli
+from mytester.red import RedResult
 from mytester.tester import Result
 
 
@@ -40,9 +41,7 @@ def test_render_appends_generated_test_body() -> None:
     ("outcome", "code"),
     [("success", 0), ("skipped", 0), ("failure", 1), ("bug_found", 2)],
 )
-def test_exit_code_maps_outcome(
-    monkeypatch: pytest.MonkeyPatch, outcome: str, code: int
-) -> None:
+def test_exit_code_maps_outcome(monkeypatch: pytest.MonkeyPatch, outcome: str, code: int) -> None:
     _stub_tester(monkeypatch, Result(outcome, None, None, "detail"))
     assert cli.main(["run", "--local-only"]) == code
 
@@ -83,3 +82,49 @@ def test_base_and_package_flags_reach_the_tester(monkeypatch: pytest.MonkeyPatch
 def test_missing_subcommand_is_a_usage_error() -> None:
     with pytest.raises(SystemExit):
         cli.main([])
+
+
+def test_render_red_plain_outcome() -> None:
+    assert cli._render_red(RedResult("clean", detail="suite passing")) == "clean: suite passing"
+
+
+def test_render_red_includes_filed_issue_numbers() -> None:
+    out = cli._render_red(RedResult("filed", filed=(3, 9), detail="2 issue(s) filed"))
+    assert "(issues: #3, #9)" in out
+
+
+def _stub_red(monkeypatch: pytest.MonkeyPatch, result: RedResult) -> dict:
+    captured: dict = {}
+
+    class _Stub:
+        def __init__(self, **kwargs: object) -> None:
+            captured["kwargs"] = kwargs
+
+        def run(self) -> RedResult:
+            captured["ran"] = True
+            return result
+
+    monkeypatch.setattr(cli, "Red", _Stub)
+    return captured
+
+
+def test_red_subcommand_runs_and_prints(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _stub_red(monkeypatch, RedResult("clean", detail="suite passing"))
+
+    assert cli.main(["red"]) == 0
+    assert captured["ran"]
+
+
+def test_red_subcommand_nonzero_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_red(monkeypatch, RedResult("failure", detail="could not run suite"))
+
+    assert cli.main(["red"]) == 1
+
+
+def test_red_subcommand_threads_base_and_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _stub_red(monkeypatch, RedResult("clean", detail="d"))
+
+    cli.main(["red", "--base", "dev", "--repo", "o/r"])
+
+    assert captured["kwargs"]["base"] == "dev"
+    assert captured["kwargs"]["github"].repo == "o/r"
