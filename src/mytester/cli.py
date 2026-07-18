@@ -7,6 +7,7 @@ from mythings.engine import ClaudeCLIEngine, Engine, NoopEngine
 from mythings.github import GitHub
 from mythings.ledger import Ledger
 
+from mytester.green import Green, GreenResult
 from mytester.red import Red, RedResult
 from mytester.tester import Result, Tester
 
@@ -27,6 +28,10 @@ def _render_red(result: RedResult) -> str:
     if result.filed:
         line += f" (issues: {', '.join(f'#{n}' for n in result.filed)})"
     return line
+
+
+def _render_green(result: GreenResult) -> str:
+    return f"{result.outcome}: {result.detail}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,6 +67,13 @@ def main(argv: list[str] | None = None) -> int:
     red.add_argument("--source", type=Path, default=Path.cwd(), help="local git repo to test")
     red.add_argument("--ledger", type=Path, default=Path(".mythings/ledger.jsonl"))
 
+    green = sub.add_parser("green", help="verify a closed test-driven issue's fix")
+    green.add_argument("issue", type=int, help="the test-driven issue to re-verify")
+    green.add_argument("--repo", help="GitHub slug owner/name (defaults to the local remote)")
+    green.add_argument("--base", default="main", help="base branch to run the test against")
+    green.add_argument("--source", type=Path, default=Path.cwd(), help="local git repo to test")
+    green.add_argument("--ledger", type=Path, default=Path(".mythings/ledger.jsonl"))
+
     args = parser.parse_args(argv)
     if args.cmd == "red":
         red_result = Red(
@@ -72,6 +84,16 @@ def main(argv: list[str] | None = None) -> int:
         ).run()
         print(_render_red(red_result))
         return 1 if red_result.outcome == "failure" else 0
+
+    if args.cmd == "green":
+        green_result = Green(
+            repo=args.source,
+            ledger=Ledger(args.ledger),
+            github=GitHub(args.repo),
+            base=args.base,
+        ).run(args.issue)
+        print(_render_green(green_result))
+        return 1 if green_result.outcome in ("needs_human", "not_found") else 0
 
     tester = Tester(
         repo=args.source,
