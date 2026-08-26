@@ -56,6 +56,33 @@ def test_run_threads_issue_and_local_only(monkeypatch: pytest.MonkeyPatch) -> No
     assert captured["run"] == {"issue": 5, "local_only": True}
 
 
+def test_ledger_defaults_relative_to_source_not_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # Regression: fleet_cycle.py runs `mytester run --source <repo>` with cwd
+    # fixed at the workspace root. A cwd-relative --ledger default silently
+    # wrote every repo's outcomes into one shared root ledger instead of each
+    # repo's own.
+    captured = _stub_tester(monkeypatch, Result("success", None, None, "d"))
+    other_repo = tmp_path / "some-other-repo"
+    other_repo.mkdir()
+
+    cli.main(["run", "--source", str(other_repo), "--local-only"])
+
+    assert captured["kwargs"]["ledger"].path == other_repo / ".mythings" / "ledger.jsonl"
+
+
+def test_explicit_ledger_still_overrides_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    captured = _stub_tester(monkeypatch, Result("success", None, None, "d"))
+    explicit = tmp_path / "elsewhere" / "ledger.jsonl"
+
+    cli.main(["run", "--source", str(tmp_path), "--ledger", str(explicit), "--local-only"])
+
+    assert captured["kwargs"]["ledger"].path == explicit
+
+
 def test_claude_cli_engine_is_wired(monkeypatch: pytest.MonkeyPatch) -> None:
     captured = _stub_tester(monkeypatch, Result("success", None, None, "d"))
 

@@ -53,7 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--base", default="main", help="base branch for the PR")
     run.add_argument("--source", type=Path, default=Path.cwd(), help="local git repo to test")
     run.add_argument("--package", help="importable package to measure (inferred if omitted)")
-    run.add_argument("--ledger", type=Path, default=Path(".mythings/ledger.jsonl"))
+    run.add_argument(
+        "--ledger", type=Path, default=None, help="default: --source/.mythings/ledger.jsonl"
+    )
     run.add_argument(
         "--local-only",
         action="store_true",
@@ -70,22 +72,36 @@ def main(argv: list[str] | None = None) -> int:
     red.add_argument("--repo", help="GitHub slug owner/name (defaults to the local remote)")
     red.add_argument("--base", default="main", help="base branch to run the suite against")
     red.add_argument("--source", type=Path, default=Path.cwd(), help="local git repo to test")
-    red.add_argument("--ledger", type=Path, default=Path(".mythings/ledger.jsonl"))
+    red.add_argument(
+        "--ledger", type=Path, default=None, help="default: --source/.mythings/ledger.jsonl"
+    )
 
     green = sub.add_parser("green", help="verify a closed test-driven issue's fix")
     green.add_argument("issue", type=int, help="the test-driven issue to re-verify")
     green.add_argument("--repo", help="GitHub slug owner/name (defaults to the local remote)")
     green.add_argument("--base", default="main", help="base branch to run the test against")
     green.add_argument("--source", type=Path, default=Path.cwd(), help="local git repo to test")
-    green.add_argument("--ledger", type=Path, default=Path(".mythings/ledger.jsonl"))
+    green.add_argument(
+        "--ledger", type=Path, default=None, help="default: --source/.mythings/ledger.jsonl"
+    )
 
     health = sub.add_parser("health", help="emit a test-health record to the ledger dir")
     health.add_argument("--base", default="main", help="base branch to run the suite against")
     health.add_argument("--source", type=Path, default=Path.cwd(), help="local git repo to test")
-    health.add_argument("--ledger", type=Path, default=Path(".mythings/ledger.jsonl"))
+    health.add_argument(
+        "--ledger", type=Path, default=None, help="default: --source/.mythings/ledger.jsonl"
+    )
     health.add_argument("--out", type=Path, default=Path(".mythings/test_health.json"))
 
     args = parser.parse_args(argv)
+    # --ledger defaults relative to --source, not cwd: fleet_cycle.py invokes
+    # every subcommand with cwd fixed at the workspace root but --source set
+    # to the repo under test, so a cwd-relative default silently wrote every
+    # repo's test outcomes into one shared root-level ledger instead of each
+    # repo's own -- exactly the file mypipeline/myreporter/mydashboard read
+    # per-repo state from.
+    if args.ledger is None:
+        args.ledger = args.source / ".mythings" / "ledger.jsonl"
     if args.cmd == "red":
         red_result = Red(
             repo=args.source,
