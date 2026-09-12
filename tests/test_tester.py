@@ -87,6 +87,22 @@ def test_happy_path_opens_pr_for_uncovered_unit(tmp_path: Path) -> None:
     assert entry.data["coverage_before"] < 100.0
 
 
+def test_auto_branch_is_reusable_across_runs(tmp_path: Path) -> None:
+    # `repo` is the fleet's long-lived local checkout, not a throwaway per-run
+    # clone -- a second run against it (the ordinary case: the target's
+    # coverage gap wasn't closed by the first attempt's still-open PR) must
+    # not fail because the branch it made last time is still sitting there.
+    repo = make_target_repo(tmp_path, fully_covered=False)
+    tester, fake, ledger = _tester(repo, tmp_path)
+
+    first = tester.run()
+    second = tester.run()
+
+    assert first.outcome == "success"
+    assert second.outcome == "success"
+    assert len([c for c in fake.calls if c[:2] == ["pr", "create"]]) == 2
+
+
 def test_fully_covered_is_a_noop(tmp_path: Path) -> None:
     repo = make_target_repo(tmp_path, fully_covered=True)
     tester, fake, ledger = _tester(repo, tmp_path)
