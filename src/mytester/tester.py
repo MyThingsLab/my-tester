@@ -313,7 +313,18 @@ class Tester:
         commit_subject = (
             f"test: {unit.qualname} fails" if bug_found else f"test: cover {unit.qualname}"
         )
-        self._git(tree, ["checkout", "-b", branch])
+        # This repo's local checkout is long-lived (the fleet reuses it across
+        # every cycle), so a prior run's branch of the same name -- abandoned,
+        # never merged -- would otherwise make checkout fail forever after the
+        # first collision, and a plain push would then be rejected as
+        # non-fast-forward against that stale remote history. Drop any prior
+        # attempt at both ends first: -B resets the local ref instead of
+        # failing, and the best-effort remote delete clears the way for an
+        # ordinary (non-force) push -- a real force-push would trip MyGuard's
+        # no_force_push rule, but this branch is never meant to carry work
+        # forward from a previous attempt, so there is nothing to preserve.
+        self._delete_remote_branch_if_present(tree, branch)
+        self._git(tree, ["checkout", "-B", branch])
         self._git(tree, ["add", relpath])
         self._git(tree, ["commit", "-m", commit_subject])
         self._git(tree, ["push", "-u", "origin", branch])
@@ -339,6 +350,19 @@ class Tester:
         proc = subprocess.run(["git", "-C", str(tree), *argv], capture_output=True, text=True)
         if proc.returncode != 0:
             raise RuntimeError(f"git {' '.join(argv)} failed: {proc.stderr.strip()}")
+
+    def _delete_remote_branch_if_present(self, tree: Path, branch: str) -> None:
+        # Best-effort: the common case is that this branch doesn't exist yet,
+        # which git reports as a failure. Only a genuine problem (auth, a
+        # protected branch) would also break the push right after this, where
+        # it surfaces on its own -- so there is nothing useful to do with this
+        # call's exit code except ignore it.
+        self._guard(f"git push origin --delete {branch}")
+        subprocess.run(
+            ["git", "-C", str(tree), "push", "origin", "--delete", branch],
+            capture_output=True,
+            text=True,
+        )
 
     def _guard(self, command: str) -> None:
         result = self.policy.evaluate(Action(kind="bash", payload={"command": command}))
