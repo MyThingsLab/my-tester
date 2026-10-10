@@ -1,0 +1,9 @@
+# Changelog
+
+## [Unreleased]
+### Added/Changed
+- shipped MyTester skeleton: coverage-driven single-test-writer, one Engine call (NoopEngine->placeholder), Workspace worktree + Guard-checked git/gh, kind=run ledger; ruff+pytest green locally (5 tests)
+- wired --engine {noop,claude-cli} into mytester run, mirroring my-reporter's pattern (default noop unchanged)
+- Mechanical migration to mythings.testing: shared FakeGh/make_git_repo replace the local FakeRunner and bare-origin builder; calc fixture sources stay local.
+### Fixed
+- live-verified --engine claude-cli against a real scratch repo: the model's reply arrived wrapped in a markdown code fence (```python ... ```), which failed ast.parse. Added an explicit no-fences instruction to _build_prompt plus a defensive _strip_code_fence() applied to any non-empty reply before appending -- verified end-to-end afterward: a real generated test (test_multiply) landed unfenced and valid
